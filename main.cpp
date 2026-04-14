@@ -23,6 +23,7 @@ struct layer
     float* Wq;
     float* Wk;
     float* Wv;
+    float* Wo;
     float* gamma;
     float* beta;
 };
@@ -49,6 +50,7 @@ int main()
     Layer = declareLayer(Layer);
 
     float* transfBuild = buildTransformerIn(tokenArr, tokenEmbed, posEmbed);
+    float* addAttention(transfBuild);
 
     normalizeTransformer(transfBuild, Layer);
 }
@@ -80,6 +82,7 @@ layer declareLayer(layer Layer)
     Layer.Wq = new float[config::d_model * config::d_model];
     Layer.Wk = new float[config::d_model * config::d_model];
     Layer.Wv = new float[config::d_model * config::d_model];
+    Layer.Wo = new float[config::d_model * config::d_model];
 
     for (int i = 0; i < config::d_model; i++)
     {
@@ -91,9 +94,10 @@ layer declareLayer(layer Layer)
     {
         for (int j = 0; j < config::d_model; j++)
         {
-            Layer.Wq[i * config::d_model + j] = rand() % 200 / 100.0;
-            Layer.Wk[i * config::d_model + j] = rand() % 200 / 100.0;
-            Layer.Wv[i * config::d_model + j] = rand() % 200 / 100.0;
+            Layer.Wq[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
+            Layer.Wk[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
+            Layer.Wv[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
+            Layer.Wo[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
         }
     }
 
@@ -148,4 +152,155 @@ float* normalizeTransformer(float* transfBuild, layer layerData)
     }
 
     return normTransfOut;
+}
+
+float* addAttention(layer Layer, float* matTransf)
+{
+    float* attentionQ = new float[config::seq_len * config::d_model];
+    float* attentionK = new float[config::seq_len * config::d_model];
+    float* attentionV = new float[config::seq_len * config::d_model];
+    float* score = new float[config::seq_len * config::seq_len];
+    float* output = new float[config::seq_len * config::d_model];
+    float* outputProjected = new float[config::seq_len * config::d_model];
+    float* result = new float[config::seq_len * config::d_model];
+    float temp = 0;
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            for (int k = 0; k < config::d_model; k++)
+            {
+                temp += matTransf[i * config::d_model + k] * Layer.Wq[k * config::d_model + j];
+            }
+
+            attentionQ[i * config::d_model + j] = temp;
+            temp = 0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            for (int k = 0; k < config::d_model; k++)
+            {
+                temp += attentionK[i * config::d_model + k] * attentionQ[j * config::d_model + k];
+            }
+
+            attentionK[i * config::d_model + j] = temp;
+            temp = 0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            for (int k = 0; k < config::d_model; k++)
+            {
+                temp += matTransf[i * config::d_model + k] * Layer.Wv[k * config::d_model + j];
+            }
+
+            attentionV[i * config::d_model + j] = temp;
+            temp = 0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::seq_len; j++)
+        {
+            for (int k = 0; k < config::d_model; k++)
+            {
+                temp += attentionQ[i * config::d_model + k] * attentionK[j * config::d_model + k];
+            }
+            score[i * config::seq_len + j] = temp / sqrt(config::d_model);
+            temp = 0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::seq_len; j++)
+        {
+            if (i < j)
+            {
+                score[i * config::seq_len + j] = -1e9;
+            }
+        }
+    }
+
+    float max[config::seq_len];
+    float sum[config::seq_len];
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        max[i] = -1e9;
+        sum[i] = 0;
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::seq_len; j++)
+        {
+            if (score[i * config::seq_len + j] > max[i])
+            {
+                max[i] = score[i * config::seq_len + j];
+            }
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::seq_len; j++)
+        {
+            score[i * config::seq_len + j] = exp(score[i * config::seq_len + j] - max[i]);
+            sum[i] += score[i * config::seq_len + j];
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::seq_len; j++)
+        {
+            score[i * config::seq_len + j] /= sum[i];
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            for (int k = 0; k < config::seq_len; k++)
+            {
+                temp += score[i * config::seq_len + k] * attentionV[k * config::d_model + j];
+            }
+
+            output[i * config::d_model + j] = temp;
+            temp = 0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            for (int k = 0; k < config::d_model; k++)
+            {
+                temp += output[i * config::d_model + k] * Layer.Wo[k * config::d_model + j];
+            }
+
+            outputProjected[i * config::d_model + j] = temp;
+            temp = 0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            result[i * config::d_model + j] = matTransf[i * config::d_model + j] + outputProjected[i * config::d_model + j];
+        }
+    }
 }
