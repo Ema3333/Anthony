@@ -20,8 +20,9 @@ struct config
 
 struct layer
 {
-    float* weight;
-    float* bias;
+    float* Wq;
+    float* Wk;
+    float* Wv;
     float* gamma;
     float* beta;
 };
@@ -29,27 +30,27 @@ struct layer
 //declare global variables
 
 config Config; // declare configuration variable with all the basic data to run the model
-layer Layer;
 
 //declare functions prototypes
 void rndDeclare(float* tokenEmbed, float* posEmbed);
+layer declareLayer(layer Layer);
 float* buildTransformerIn(int tokenArr[1024], float* tokenEmbed, float* posEmbed);
-float* normalizeTransformer(float* transfBuild);
+float* normalizeTransformer(float* transfBuild, layer layerData);
 
 int main()
 {
     srand(time(NULL));
 
-    Layer.gamma = new float[config::seq_len * config::d_model];
-    Layer.beta = 0;
-
     float* tokenEmbed = new float[config::vocab_size * config::d_model];
     float* posEmbed = new float[config::max_tok * config::d_model];
 
     rndDeclare(tokenEmbed, posEmbed);
+    layer Layer;
+    Layer = declareLayer(Layer);
+
     float* transfBuild = buildTransformerIn(tokenArr, tokenEmbed, posEmbed);
 
-    normalizeTransformer(transfBuild);
+    normalizeTransformer(transfBuild, Layer);
 }
 
 void rndDeclare(float* tokenEmbed, float* posEmbed)
@@ -69,6 +70,34 @@ void rndDeclare(float* tokenEmbed, float* posEmbed)
             posEmbed[i * config::d_model + j] = rand() % 200 / 100.0;
         }
     }
+}
+
+layer declareLayer(layer Layer)
+{
+    Layer.gamma = new float[config::d_model];
+    Layer.beta = new float[config::d_model];
+
+    Layer.Wq = new float[config::d_model * config::d_model];
+    Layer.Wk = new float[config::d_model * config::d_model];
+    Layer.Wv = new float[config::d_model * config::d_model];
+
+    for (int i = 0; i < config::d_model; i++)
+    {
+        Layer.gamma[i] = 1;
+        Layer.beta[i] = 0;
+    }
+
+    for (int i = 0; i < config::d_model; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            Layer.Wq[i * config::d_model + j] = rand() % 200 / 100.0;
+            Layer.Wk[i * config::d_model + j] = rand() % 200 / 100.0;
+            Layer.Wv[i * config::d_model + j] = rand() % 200 / 100.0;
+        }
+    }
+
+    return Layer;
 }
 
 float* buildTransformerIn(int tokenArr[1024], float* tokenEmbed, float* posEmbed)
