@@ -18,12 +18,22 @@ struct config
     static const int seq_len = sizeof(tokenArr) / sizeof(tokenArr[0]);
 };
 
-struct layer
+struct layerAttention
 {
     float* Wq;
     float* Wk;
     float* Wv;
     float* Wo;
+};
+
+struct layerFfn
+{
+    float* weight;
+    float* bias;
+};
+
+struct layerNorm
+{
     float* gamma;
     float* beta;
 };
@@ -33,10 +43,14 @@ struct layer
 config Config; // declare configuration variable with all the basic data to run the model
 
 //declare functions prototypes
-void rndDeclare(float* tokenEmbed, float* posEmbed);
-layer declareLayer(layer Layer);
-float* buildTransformerIn(int tokenArr[1024], float* tokenEmbed, float* posEmbed);
-float* normalizeTransformer(float* transfBuild, layer layerData);
+float* normalizer(float* transfBuild, layerNorm layerData);
+void declareEmbed(float* tokenEmbed, float* posEmbed);
+layerAttention declareAttention(layerAttention Layer);
+layerNorm declareNorm(layerNorm Layer);
+layerFfn declareFfn(layerFfn LayerFfn);
+float* transformerNetwork(int tokenArr[1024], float* tokenEmbed, float* posEmbed);
+float* attentionNetwork(layerAttention Layer, float* matTransf);
+float* ffnNetwork(float* data, layerFfn Layer);
 
 int main()
 {
@@ -45,82 +59,25 @@ int main()
     float* tokenEmbed = new float[config::vocab_size * config::d_model];
     float* posEmbed = new float[config::max_tok * config::d_model];
 
-    rndDeclare(tokenEmbed, posEmbed);
-    layer Layer;
-    Layer = declareLayer(Layer);
+    declareEmbed(tokenEmbed, posEmbed);
+    layerAttention layerAtt;
+    layerFfn LayerFfn;
+    layerNorm LayerNormAtt;
+    layerNorm LayerNormFfn;
+    layerAtt = declareAttention(layerAtt);
+    LayerNormAtt = declareNorm(LayerNormAtt);
 
-    float* transfBuild = buildTransformerIn(tokenArr, tokenEmbed, posEmbed);
-    float* addAttention(transfBuild);
+    float* transfBuild = transformerNetwork(tokenArr, tokenEmbed, posEmbed);
+    transfBuild = normalizer(transfBuild, LayerNormAtt);
+    float* result = attentionNetwork(layerAtt, transfBuild);
 
-    normalizeTransformer(transfBuild, Layer);
+    LayerNormFfn = declareNorm(LayerNormFfn);
+    float* resultNorm = normalizer(result, LayerNormFfn);
+    LayerFfn = declareFfn(LayerFfn);
+    ffnNetwork(resultNorm, LayerFfn);
 }
 
-void rndDeclare(float* tokenEmbed, float* posEmbed)
-{
-    for (int i = 0; i < config::vocab_size; i++)
-    {
-        for (int j = 0; j < config::d_model; j++)
-        {
-            tokenEmbed[i * config::d_model + j] = rand() % 200 / 100.0;
-        }
-    }
-
-    for (int i = 0; i < config::max_tok; i++)
-    {
-        for (int j = 0; j < config::d_model; j++)
-        {
-            posEmbed[i * config::d_model + j] = rand() % 200 / 100.0;
-        }
-    }
-}
-
-layer declareLayer(layer Layer)
-{
-    Layer.gamma = new float[config::d_model];
-    Layer.beta = new float[config::d_model];
-
-    Layer.Wq = new float[config::d_model * config::d_model];
-    Layer.Wk = new float[config::d_model * config::d_model];
-    Layer.Wv = new float[config::d_model * config::d_model];
-    Layer.Wo = new float[config::d_model * config::d_model];
-
-    for (int i = 0; i < config::d_model; i++)
-    {
-        Layer.gamma[i] = 1;
-        Layer.beta[i] = 0;
-    }
-
-    for (int i = 0; i < config::d_model; i++)
-    {
-        for (int j = 0; j < config::d_model; j++)
-        {
-            Layer.Wq[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
-            Layer.Wk[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
-            Layer.Wv[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
-            Layer.Wo[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
-        }
-    }
-
-    return Layer;
-}
-
-float* buildTransformerIn(int tokenArr[1024], float* tokenEmbed, float* posEmbed)
-{
-    float* transformerIn = new float[config::seq_len * config::d_model];
-
-    for (int i = 0; i < config::seq_len; i++)
-    {
-        cout << endl;
-        for (int j = 0; j < config::d_model; j++)
-        {
-            transformerIn[i * config::d_model + j] = tokenEmbed[tokenArr[i] * config::d_model + j] + posEmbed[i * config::d_model + j];
-        }
-    }
-
-    return transformerIn;
-}
-
-float* normalizeTransformer(float* transfBuild, layer layerData)
+float* normalizer(float* transfBuild, layerNorm layerData)
 {
     float mean = 0;
     float variance = 0;
@@ -154,7 +111,99 @@ float* normalizeTransformer(float* transfBuild, layer layerData)
     return normTransfOut;
 }
 
-float* addAttention(layer Layer, float* matTransf)
+void declareEmbed(float* tokenEmbed, float* posEmbed)
+{
+    for (int i = 0; i < config::vocab_size; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            tokenEmbed[i * config::d_model + j] = rand() % 200 / 100.0;
+        }
+    }
+
+    for (int i = 0; i < config::max_tok; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            posEmbed[i * config::d_model + j] = rand() % 200 / 100.0;
+        }
+    }
+}
+
+
+
+layerNorm declareNorm(layerNorm Layer)
+{
+    Layer.gamma = new float[config::d_model];
+    Layer.beta = new float[config::d_model];
+
+    for (int i = 0; i < config::d_model; i++)
+    {
+        Layer.gamma[i] = 1;
+        Layer.beta[i] = 0;
+    }
+
+    return Layer;
+}
+
+layerAttention declareAttention(layerAttention Layer)
+{
+    Layer.Wq = new float[config::d_model * config::d_model];
+    Layer.Wk = new float[config::d_model * config::d_model];
+    Layer.Wv = new float[config::d_model * config::d_model];
+    Layer.Wo = new float[config::d_model * config::d_model];
+
+    for (int i = 0; i < config::d_model; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            Layer.Wq[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
+            Layer.Wk[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
+            Layer.Wv[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
+            Layer.Wo[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
+        }
+    }
+
+    return Layer;
+}
+
+layerFfn declareFfn(layerFfn LayerFfn)
+{
+    LayerFfn.weight = new float[config::d_model * config::d_model * 4];
+    LayerFfn.bias = new float[config::d_model * 4];
+
+    for (int i = 0; i < config::d_model; i++)
+    {
+        for (int j = 0; j < config::d_model * 4; j++)
+        {
+            LayerFfn.weight[i * (config::d_model * 4) + j] = rand() % 200 / 100.0;
+            if (i == 0)
+            {
+                LayerFfn.bias[j] = 0.0;
+            }
+        }
+    }
+
+    return LayerFfn;
+}
+
+float* transformerNetwork(int tokenArr[1024], float* tokenEmbed, float* posEmbed)
+{
+    float* transformerIn = new float[config::seq_len * config::d_model];
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        cout << endl;
+        for (int j = 0; j < config::d_model; j++)
+        {
+            transformerIn[i * config::d_model + j] = tokenEmbed[tokenArr[i] * config::d_model + j] + posEmbed[i * config::d_model + j];
+        }
+    }
+
+    return transformerIn;
+}
+
+float* attentionNetwork(layerAttention Layer, float* matTransf)
 {
     float* attentionQ = new float[config::seq_len * config::d_model];
     float* attentionK = new float[config::seq_len * config::d_model];
@@ -301,6 +350,34 @@ float* addAttention(layer Layer, float* matTransf)
         for (int j = 0; j < config::d_model; j++)
         {
             result[i * config::d_model + j] = matTransf[i * config::d_model + j] + outputProjected[i * config::d_model + j];
+        }
+    }
+
+    return result;
+}
+
+float* ffnNetwork(float* transf, layerFfn Layer)
+{
+    float* expTansf = new float[config::seq_len * config::d_model * 4];
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model * 4; j++)
+        {
+            expTansf[i * (config::d_model * 4) + j] = 0.0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model * 4; j++)
+        {
+            for (int k = 0; k < config::d_model; k++)
+            {
+                expTansf[i * (config::d_model * 4) + j] += transf[i * config::d_model + k] * Layer.weight[k * (config::d_model * 4) + j];
+            }
+
+            expTansf[i * (config::d_model * 4) + j] += Layer.bias[j];
         }
     }
 }
