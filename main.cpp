@@ -2,6 +2,7 @@
 #include <fstream>
 #include <ctime>
 #include <cmath>
+#include <numbers>
 
 using namespace std;
 
@@ -28,8 +29,10 @@ struct layerAttention
 
 struct layerFfn
 {
-    float* weight;
-    float* bias;
+    float* weight1;
+    float* bias1;
+    float* weight2;
+    float* bias2;
 };
 
 struct layerNorm
@@ -49,8 +52,9 @@ layerAttention declareAttention(layerAttention Layer);
 layerNorm declareNorm(layerNorm Layer);
 layerFfn declareFfn(layerFfn LayerFfn);
 float* transformerNetwork(int tokenArr[1024], float* tokenEmbed, float* posEmbed);
-float* attentionNetwork(layerAttention Layer, float* matTransf);
-float* ffnNetwork(float* data, layerFfn Layer);
+float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual);
+float* ffnNetwork(float* data, layerFfn Layer, float* residual);
+float* transformerBlock(float* transfBuild, layerAttention layerAtt, layerFfn LayerFfn, layerNorm LayerNormAtt, layerNorm LayerNormFfn);
 
 int main()
 {
@@ -58,30 +62,38 @@ int main()
 
     float* tokenEmbed = new float[config::vocab_size * config::d_model];
     float* posEmbed = new float[config::max_tok * config::d_model];
+    float* transf = new float[config::seq_len * config::d_model];
+
+    layerAttention layerAtt[config::n_layer];
+    layerFfn LayerFfn[config::n_layer];
+    layerNorm LayerNormAtt[config::n_layer];
+    layerNorm LayerNormFfn[config::n_layer];
 
     declareEmbed(tokenEmbed, posEmbed);
-    layerAttention layerAtt;
-    layerFfn LayerFfn;
-    layerNorm LayerNormAtt;
-    layerNorm LayerNormFfn;
-    layerAtt = declareAttention(layerAtt);
-    LayerNormAtt = declareNorm(LayerNormAtt);
+    transf = transformerNetwork(tokenArr, tokenEmbed, posEmbed);
 
-    float* transfBuild = transformerNetwork(tokenArr, tokenEmbed, posEmbed);
-    transfBuild = normalizer(transfBuild, LayerNormAtt);
-    float* result = attentionNetwork(layerAtt, transfBuild);
+    for (int i = 0; i < config::n_layer; i++)
+    {
+        layerAtt[i] = declareAttention(layerAtt[i]);
+        LayerFfn[i] = declareFfn(LayerFfn[i]);
+        LayerNormAtt[i] = declareNorm(LayerNormAtt[i]);
+        LayerNormFfn[i] = declareNorm(LayerNormFfn[i]);
+    }
 
-    LayerNormFfn = declareNorm(LayerNormFfn);
-    float* resultNorm = normalizer(result, LayerNormFfn);
-    LayerFfn = declareFfn(LayerFfn);
-    ffnNetwork(resultNorm, LayerFfn);
+    for (int i = 0; i < config::n_layer; i++)
+    {
+        transf = transformerBlock(transf, layerAtt[i], LayerFfn[i], LayerNormAtt[i], LayerNormFfn[i]);
+    }
+
+    delete[] transf;
+    delete[] tokenEmbed;
+    delete[] posEmbed;
 }
 
 float* normalizer(float* transfBuild, layerNorm layerData)
 {
     float mean = 0;
     float variance = 0;
-    float* normTransf = new float[config::seq_len * config::d_model];
     float* normTransfOut = new float[config::seq_len * config::d_model];
 
     for (int a = 0; a < config::seq_len; a++)
@@ -100,8 +112,8 @@ float* normalizer(float* transfBuild, layerNorm layerData)
         variance /= config::d_model;
         for (int i = 0; i < config::d_model; i++)
         {
-            normTransf[a * config::d_model + i] = (transfBuild[a * config::d_model + i] - mean) / sqrt(variance + 1e-5);
-            normTransfOut[a * config::d_model + i] = layerData.gamma[i] * normTransf[a * config::d_model + i] + layerData.beta[i];
+            normTransfOut[a * config::d_model + i] = (transfBuild[a * config::d_model + i] - mean) / sqrt(variance + 1e-5);
+            normTransfOut[a * config::d_model + i] = layerData.gamma[i] * normTransfOut[a * config::d_model + i] + layerData.beta[i];
         }
 
         variance = 0;
@@ -117,7 +129,7 @@ void declareEmbed(float* tokenEmbed, float* posEmbed)
     {
         for (int j = 0; j < config::d_model; j++)
         {
-            tokenEmbed[i * config::d_model + j] = rand() % 200 / 100.0;
+            tokenEmbed[i * config::d_model + j] = rand() % 200 / 100.0 - 1.0;
         }
     }
 
@@ -125,12 +137,10 @@ void declareEmbed(float* tokenEmbed, float* posEmbed)
     {
         for (int j = 0; j < config::d_model; j++)
         {
-            posEmbed[i * config::d_model + j] = rand() % 200 / 100.0;
+            posEmbed[i * config::d_model + j] = rand() % 200 / 100.0 - 1.0;
         }
     }
 }
-
-
 
 layerNorm declareNorm(layerNorm Layer)
 {
@@ -157,10 +167,10 @@ layerAttention declareAttention(layerAttention Layer)
     {
         for (int j = 0; j < config::d_model; j++)
         {
-            Layer.Wq[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
-            Layer.Wk[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
-            Layer.Wv[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
-            Layer.Wo[i * config::d_model + j] = rand() % 200 / 100.0 - 100.0;
+            Layer.Wq[i * config::d_model + j] = rand() % 200 / 100.0 - 1.0;
+            Layer.Wk[i * config::d_model + j] = rand() % 200 / 100.0 - 1.0;
+            Layer.Wv[i * config::d_model + j] = rand() % 200 / 100.0 - 1.0;
+            Layer.Wo[i * config::d_model + j] = rand() % 200 / 100.0 - 1.0;
         }
     }
 
@@ -169,17 +179,31 @@ layerAttention declareAttention(layerAttention Layer)
 
 layerFfn declareFfn(layerFfn LayerFfn)
 {
-    LayerFfn.weight = new float[config::d_model * config::d_model * 4];
-    LayerFfn.bias = new float[config::d_model * 4];
+    LayerFfn.weight1 = new float[config::d_model * config::d_model * 4];
+    LayerFfn.bias1 = new float[config::d_model * 4];
+    LayerFfn.weight2 = new float[config::d_model * config::d_model * 4];
+    LayerFfn.bias2 = new float[config::d_model];
 
     for (int i = 0; i < config::d_model; i++)
     {
         for (int j = 0; j < config::d_model * 4; j++)
         {
-            LayerFfn.weight[i * (config::d_model * 4) + j] = rand() % 200 / 100.0;
+            LayerFfn.weight1[i * (config::d_model * 4) + j] = rand() % 200 / 100.0 - 1.0;
             if (i == 0)
             {
-                LayerFfn.bias[j] = 0.0;
+                LayerFfn.bias1[j] = 0.0;
+            }
+        }
+    }
+
+    for (int i = 0; i < config::d_model * 4; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            LayerFfn.weight2[i * config::d_model + j] = rand() % 200 / 100.0 - 1.0;
+            if (i == 0)
+            {
+                LayerFfn.bias2[j] = 0.0;
             }
         }
     }
@@ -193,7 +217,6 @@ float* transformerNetwork(int tokenArr[1024], float* tokenEmbed, float* posEmbed
 
     for (int i = 0; i < config::seq_len; i++)
     {
-        cout << endl;
         for (int j = 0; j < config::d_model; j++)
         {
             transformerIn[i * config::d_model + j] = tokenEmbed[tokenArr[i] * config::d_model + j] + posEmbed[i * config::d_model + j];
@@ -203,7 +226,7 @@ float* transformerNetwork(int tokenArr[1024], float* tokenEmbed, float* posEmbed
     return transformerIn;
 }
 
-float* attentionNetwork(layerAttention Layer, float* matTransf)
+float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual)
 {
     float* attentionQ = new float[config::seq_len * config::d_model];
     float* attentionK = new float[config::seq_len * config::d_model];
@@ -211,7 +234,6 @@ float* attentionNetwork(layerAttention Layer, float* matTransf)
     float* score = new float[config::seq_len * config::seq_len];
     float* output = new float[config::seq_len * config::d_model];
     float* outputProjected = new float[config::seq_len * config::d_model];
-    float* result = new float[config::seq_len * config::d_model];
     float temp = 0;
 
     for (int i = 0; i < config::seq_len; i++)
@@ -234,7 +256,7 @@ float* attentionNetwork(layerAttention Layer, float* matTransf)
         {
             for (int k = 0; k < config::d_model; k++)
             {
-                temp += attentionK[i * config::d_model + k] * attentionQ[j * config::d_model + k];
+                temp += matTransf[i * config::d_model + k] * Layer.Wk[k * config::d_model + j];
             }
 
             attentionK[i * config::d_model + j] = temp;
@@ -280,8 +302,8 @@ float* attentionNetwork(layerAttention Layer, float* matTransf)
         }
     }
 
-    float max[config::seq_len];
-    float sum[config::seq_len];
+    float* max = new float[config::seq_len];
+    float* sum = new float[config::seq_len];
 
     for (int i = 0; i < config::seq_len; i++)
     {
@@ -349,16 +371,25 @@ float* attentionNetwork(layerAttention Layer, float* matTransf)
     {
         for (int j = 0; j < config::d_model; j++)
         {
-            result[i * config::d_model + j] = matTransf[i * config::d_model + j] + outputProjected[i * config::d_model + j];
+            outputProjected[i * config::d_model + j] += residual[i * config::d_model + j];
         }
     }
 
-    return result;
+    delete[] attentionQ;
+    delete[] attentionK;
+    delete[] attentionV;
+    delete[] score;
+    delete[] output;
+    delete[] max;
+    delete[] sum;
+
+    return outputProjected;
 }
 
-float* ffnNetwork(float* transf, layerFfn Layer)
+float* ffnNetwork(float* transf, layerFfn Layer, float* residual)
 {
     float* expTansf = new float[config::seq_len * config::d_model * 4];
+    float* resizeTransf = new float[config::seq_len * config::d_model];
 
     for (int i = 0; i < config::seq_len; i++)
     {
@@ -370,14 +401,74 @@ float* ffnNetwork(float* transf, layerFfn Layer)
 
     for (int i = 0; i < config::seq_len; i++)
     {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            resizeTransf[i * config::d_model + j] = 0.0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
         for (int j = 0; j < config::d_model * 4; j++)
         {
             for (int k = 0; k < config::d_model; k++)
             {
-                expTansf[i * (config::d_model * 4) + j] += transf[i * config::d_model + k] * Layer.weight[k * (config::d_model * 4) + j];
+                expTansf[i * (config::d_model * 4) + j] += transf[i * config::d_model + k] * Layer.weight1[k * (config::d_model * 4) + j];
             }
 
-            expTansf[i * (config::d_model * 4) + j] += Layer.bias[j];
+            expTansf[i * (config::d_model * 4) + j] += Layer.bias1[j];
         }
     }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model * 4; j++)
+        {
+            float x = expTansf[i * (config::d_model * 4) + j];
+            expTansf[i * (config::d_model * 4) + j] = x * 0.5 * (1 + tanh(sqrt(2/numbers::pi) * (x + 0.044715 * x * x * x)));
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            for (int k = 0; k < config::d_model * 4; k++)
+            {
+                resizeTransf[i * config::d_model + j] += expTansf[i * (config::d_model * 4) + k] * Layer.weight2[k * config::d_model + j];
+            }
+
+            resizeTransf[i * config::d_model + j] += Layer.bias2[j];
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::d_model; j++)
+        {
+            resizeTransf[i * config::d_model + j] += residual[i * config::d_model + j];
+        }
+    }
+
+    delete[] expTansf;
+
+    return resizeTransf;
+}
+
+float* transformerBlock(float* transfBuild, layerAttention layerAtt, layerFfn LayerFfn, layerNorm LayerNormAtt, layerNorm LayerNormFfn)
+{
+    float* norm1 = normalizer(transfBuild, LayerNormAtt);
+    float* resultAtt = attentionNetwork(layerAtt, norm1, transfBuild);
+
+    delete[] transfBuild;
+    delete[] norm1;
+
+    float* norm2 = normalizer(resultAtt, LayerNormFfn);
+
+    float* resultFfn = ffnNetwork(norm2, LayerFfn, resultAtt);
+
+    delete[] norm2;
+    delete[] resultAtt;
+
+    return resultFfn;
 }
