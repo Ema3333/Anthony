@@ -54,6 +54,7 @@ layerFfn declareFfn(layerFfn LayerFfn);
 float* transformerNetwork(int tokenArr[1024], float* tokenEmbed, float* posEmbed);
 float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual);
 float* ffnNetwork(float* data, layerFfn Layer, float* residual);
+int prediction(float* context, float* Layer);
 float* transformerBlock(float* transfBuild, layerAttention layerAtt, layerFfn LayerFfn, layerNorm LayerNormAtt, layerNorm LayerNormFfn);
 
 int main()
@@ -68,6 +69,7 @@ int main()
     layerFfn LayerFfn[config::n_layer];
     layerNorm LayerNormAtt[config::n_layer];
     layerNorm LayerNormFfn[config::n_layer];
+    layerNorm layerNormFinal;
 
     declareEmbed(tokenEmbed, posEmbed);
     transf = transformerNetwork(tokenArr, tokenEmbed, posEmbed);
@@ -84,10 +86,12 @@ int main()
     {
         transf = transformerBlock(transf, layerAtt[i], LayerFfn[i], LayerNormAtt[i], LayerNormFfn[i]);
     }
-
-    delete[] transf;
-    delete[] tokenEmbed;
     delete[] posEmbed;
+
+    layerNormFinal = declareNorm(layerNormFinal);
+    float* transfNorm = normalizer(transf, layerNormFinal);
+
+    prediction(transfNorm, tokenEmbed);
 }
 
 float* normalizer(float* transfBuild, layerNorm layerData)
@@ -453,6 +457,71 @@ float* ffnNetwork(float* transf, layerFfn Layer, float* residual)
     delete[] expTansf;
 
     return resizeTransf;
+}
+
+int prediction(float* transf, float* tokenEmbed)
+{
+    float* logits = new float[config::seq_len * config::vocab_size];
+    int predictedToken = 0;
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::vocab_size; j++)
+        {
+            logits[i * config::vocab_size + j] = 0.0;
+        }
+    }
+
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        for (int j = 0; j < config::vocab_size; j++)
+        {
+            for (int k = 0; k < config::d_model; k++)
+            {
+                logits[i * config::vocab_size + j] += transf[i * config::d_model + k] * tokenEmbed[j * config::d_model + k];
+            }
+        }
+    }
+
+    float max;
+    float sum;
+    for (int i = 0; i < config::seq_len; i++)
+    {
+        sum = 0.0;
+        max = logits[i * config::vocab_size + 0];
+
+        for (int j = 0; j < config::vocab_size; j++)
+        {
+            if (logits[i * config::vocab_size + j] > max)
+            {
+                max = logits[i * config::vocab_size + j];
+            }
+        }
+
+        for (int j = 0; j < config::vocab_size; j++)
+        {
+            logits[i * config::vocab_size + j] = exp(logits[i * config::vocab_size + j] - max);
+            sum += logits[i * config::vocab_size + j];
+        }
+
+        for (int j = 0; j < config::vocab_size; j++)
+        {
+            logits[i * config::vocab_size + j] /= sum;
+        }
+    }
+
+    max = 0.0;
+    for (int j = 0; j < config::vocab_size; j++)
+    {
+        if (max < logits[(config::seq_len - 1) * config::vocab_size + j])
+        {
+            max = logits[(config::seq_len - 1) * config::vocab_size + j];
+            predictedToken = j;
+        }
+    }
+
+    cout << predictedToken << " " << max << endl;
+    return predictedToken;
 }
 
 float* transformerBlock(float* transfBuild, layerAttention layerAtt, layerFfn LayerFfn, layerNorm LayerNormAtt, layerNorm LayerNormFfn)
