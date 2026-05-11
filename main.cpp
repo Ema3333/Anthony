@@ -50,15 +50,15 @@ struct trainData {
     float* x_after_ffn;
 
     // Statistiche di LayerNorm
-    float* mean_norm1;
-    float* var_norm1;
-    float* mean_norm2;
-    float* var_norm2;
+    float* mean_norm1 = new float[config::seq_len];
+    float* var_norm1 = new float[config::seq_len];
+    float* mean_norm2 = new float[config::seq_len];
+    float* var_norm2 = new float[config::seq_len];
 
     // Attivazioni interne dell'attention
-    float* Q;
-    float* K;
-    float* V;
+    float* Q = new float[config::seq_len * config::d_model];
+    float* K = new float[config::seq_len * config::d_model];
+    float* V = new float[config::seq_len * config::d_model];
     float* attn_weights;
     float* attn_output;
 
@@ -72,7 +72,7 @@ struct trainData {
 config Config; // declare configuration variable with all the basic data to run the model
 
 //declare functions prototypes
-float* normalizer(float* transfBuild, layerNorm layerData, trainData train);
+float* normalizer(float* transfBuild, layerNorm layerData, float* tMean, float* tVar);
 void declareEmbed(float* tokenEmbed, float* posEmbed, normal_distribution<float>, mt19937);
 layerAttention declareAttention(layerAttention Layer, normal_distribution<float>, mt19937);
 layerNorm declareNorm(layerNorm Layer);
@@ -102,6 +102,8 @@ int main()
     declareEmbed(tokenEmbed, posEmbed, gauss, gen);
     transf = transformerNetwork(tokenArr, tokenEmbed, posEmbed);
 
+    float* norm3 = new float[2 * config::seq_len];
+
     for (int i = 0; i < config::n_layer; i++)
     {
         layerAtt[i] = declareAttention(layerAtt[i], gauss, gen);
@@ -117,12 +119,12 @@ int main()
     delete[] posEmbed;
 
     layerNormFinal = declareNorm(layerNormFinal);
-    float* transfNorm = normalizer(transf, layerNormFinal, train[config::n_layer - 1]);
+    float* transfNorm = normalizer(transf, layerNormFinal, norm3, norm3);
 
     prediction(transfNorm, tokenEmbed);
 }
 
-float* normalizer(float* transfBuild, layerNorm layerData, trainData train)
+float* normalizer(float* transfBuild, layerNorm layerData, float* tMean, float* tVar)
 {
     float mean = 0;
     float variance = 0;
@@ -136,12 +138,17 @@ float* normalizer(float* transfBuild, layerNorm layerData, trainData train)
         }
 
         mean /= config::d_model;
+
+        tMean[config::seq_len] = mean;
+
         for (int i = 0; i < config::d_model; i++)
         {
             variance += pow(transfBuild[a * config::d_model + i] - mean, 2);
         }
 
         variance /= config::d_model;
+
+        tVar[config::seq_len] = variance;
         for (int i = 0; i < config::d_model; i++)
         {
             normTransfOut[a * config::d_model + i] = (transfBuild[a * config::d_model + i] - mean) / sqrt(variance + 1e-5);
@@ -292,6 +299,7 @@ float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual,
             }
 
             attentionK[i * config::d_model + j] = temp;
+            train.K[i * config::d_model + j] = temp;
             temp = 0;
         }
     }
@@ -306,6 +314,7 @@ float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual,
             }
 
             attentionV[i * config::d_model + j] = temp;
+            train.V[i * config::d_model + j] = temp;
             temp = 0;
         }
     }
@@ -319,6 +328,7 @@ float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual,
                 temp += attentionQ[i * config::d_model + k] * attentionK[j * config::d_model + k];
             }
             score[i * config::seq_len + j] = temp / sqrt(config::d_model);
+            train.Q[i * config::d_model + j] = temp;
             temp = 0;
         }
     }
@@ -559,13 +569,13 @@ float* transformerBlock(float* transfBuild, layerAttention layerAtt, layerFfn La
 {
     train.x_in = transfBuild;
 
-    float* norm1 = normalizer(transfBuild, LayerNormAtt, train);
+    float* norm1 = normalizer(transfBuild, LayerNormAtt, train.mean_norm1, train.var_norm1);
     train.x_norm1 = norm1;
 
     float* resultAtt = attentionNetwork(layerAtt, norm1, transfBuild, train);
     train.x_after_attn = resultAtt;
 
-    float* norm2 = normalizer(resultAtt, LayerNormFfn, train);
+    float* norm2 = normalizer(resultAtt, LayerNormFfn, train.mean_norm2, train.var_norm2);
     train.x_norm2 = norm2;
 
     float* resultFfn = ffnNetwork(norm2, LayerFfn, resultAtt, train);
@@ -576,25 +586,25 @@ float* transformerBlock(float* transfBuild, layerAttention layerAtt, layerFfn La
 
 void emptyTrainData(trainData* train, int n_layer)
 {
-    for (int b = 0; b < n_layer; b++)
+    for (int i = 0; i < n_layer; i++)
     {
-        delete[] train[b].x_norm1;
-        delete[] train[b].x_after_attn;
-        delete[] train[b].x_norm2;
-        delete[] train[b].x_after_ffn;
+        delete[] train[i].x_norm1;
+        delete[] train[i].x_after_attn;
+        delete[] train[i].x_norm2;
+        delete[] train[i].x_after_ffn;
 
-        delete[] train[b].mean_norm1;
-        delete[] train[b].var_norm1;
-        delete[] train[b].mean_norm2;
-        delete[] train[b].var_norm2;
+        delete[] train[i].mean_norm1;
+        delete[] train[i].var_norm1;
+        delete[] train[i].mean_norm2;
+        delete[] train[i].var_norm2;
 
-        delete[] train[b].Q;
-        delete[] train[b].K;
-        delete[] train[b].V;
-        delete[] train[b].attn_weights;
-        delete[] train[b].attn_output;
+        delete[] train[i].Q;
+        delete[] train[i].K;
+        delete[] train[i].V;
+        delete[] train[i].attn_weights;
+        delete[] train[i].attn_output;
 
-        delete[] train[b].ffn_pre_gelu;
-        delete[] train[b].ffn_post_gelu;
+        delete[] train[i].ffn_pre_gelu;
+        delete[] train[i].ffn_post_gelu;
     }
 }
