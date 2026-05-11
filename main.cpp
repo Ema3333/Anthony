@@ -59,7 +59,7 @@ struct trainData {
     float* Q = new float[config::seq_len * config::d_model];
     float* K = new float[config::seq_len * config::d_model];
     float* V = new float[config::seq_len * config::d_model];
-    float* attn_weights;
+    float* attn_weights = new float[config::seq_len * config::d_model];
     float* attn_output;
 
     // Attivazioni interne dell'FFN
@@ -285,6 +285,7 @@ float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual,
             }
 
             attentionQ[i * config::d_model + j] = temp;
+            train.Q[i * config::d_model + j] = temp;
             temp = 0;
         }
     }
@@ -328,7 +329,6 @@ float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual,
                 temp += attentionQ[i * config::d_model + k] * attentionK[j * config::d_model + k];
             }
             score[i * config::seq_len + j] = temp / sqrt(config::d_model);
-            train.Q[i * config::d_model + j] = temp;
             temp = 0;
         }
     }
@@ -378,6 +378,7 @@ float* attentionNetwork(layerAttention Layer, float* matTransf, float* residual,
         for (int j = 0; j < config::seq_len; j++)
         {
             score[i * config::seq_len + j] /= sum[i];
+            train.attn_weights[i * config::seq_len + j] = score[i * config::seq_len + j];
         }
     }
 
